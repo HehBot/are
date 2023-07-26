@@ -20,13 +20,19 @@ private:
     std::size_t q0, qf;
 
     std::vector<std::vector<std::set<std::size_t>>> delta;
+    std::vector<std::set<std::size_t>> epsilon_closure; // contains epsilon closure of state q
+    std::vector<std::set<std::size_t>> epsilon_parents; // contains epsilon parents of state q
 
 private:
     void add_state(std::size_t q)
     {
         if (q >= Q) {
-            for (std::size_t i = Q; i <= q; ++i)
+            epsilon_closure.resize(q + 1);
+            epsilon_parents.resize(q + 1);
+            for (std::size_t i = Q; i <= q; ++i) {
                 delta.push_back(std::vector<std::set<std::size_t>>(Sigma.size()));
+                epsilon_closure[i] = { i };
+            }
             Q = q + 1;
         }
     }
@@ -40,12 +46,20 @@ private:
                 delta[i].resize(S);
         }
     }
+    void update_epsilon_closure(std::size_t q, std::set<std::size_t> const& e_c, std::set<std::size_t>& visited)
+    {
+        if (visited.count(q) == 1)
+            return;
+        visited.insert(q);
+        epsilon_closure[q].insert(e_c.begin(), e_c.end());
+        for (std::size_t qp : epsilon_parents[q])
+            update_epsilon_closure(qp, e_c, visited);
+    }
 
 public:
     enfa()
         : Q(0), q0(-1), qf(-1)
     {
-        add_letter(Alpha());
     }
 
     void add_transition(std::size_t q1, Alpha a, std::size_t q2)
@@ -61,7 +75,10 @@ public:
         add_state(q1);
         add_state(q2);
 
-        delta[q1][0].insert(q2);
+        epsilon_parents[q2].insert(q1);
+
+        std::set<std::size_t> visited;
+        update_epsilon_closure(q1, epsilon_closure[q2], visited);
     }
     void mark_start_state(std::size_t q)
     {
@@ -80,37 +97,26 @@ public:
             throw std::domain_error("\u03b5-NFA start state not defined");
         if (qf + 1 == 0)
             return false;
-        std::set<std::size_t> curr({ q0 });
 
-        // curr = epsilon-closure of curr
-        std::set<std::size_t> temp = curr;
-        do {
-            curr = temp;
-            for (std::size_t q : curr) {
-                auto const& s = delta[q][0];
-                temp.insert(s.begin(), s.end());
-            }
-        } while (curr != temp);
+        std::set<std::size_t> curr = epsilon_closure[q0];
 
         for (auto const& alpha : str) {
             // temp = delta(curr, alpha)
             if (Sigma_index.count(alpha) == 0)
                 return false;
             std::size_t a = Sigma_index[alpha];
-            temp.clear();
+            std::set<std::size_t> temp;
             for (std::size_t q : curr) {
                 auto const& s = delta[q][a];
                 temp.insert(s.begin(), s.end());
             }
 
             // curr = epsilon_closure(temp)
-            do {
-                curr = temp;
-                for (std::size_t q : curr) {
-                    auto const& s = delta[q][0];
-                    temp.insert(s.begin(), s.end());
-                }
-            } while (curr != temp);
+            curr.clear();
+            for (std::size_t q : temp) {
+                auto const& e_c = epsilon_closure[q];
+                curr.insert(e_c.begin(), e_c.end());
+            }
         }
 
         return (curr.count(qf) == 1);
@@ -128,17 +134,11 @@ public:
         if (qf + 1 != 0)
             f << "\t" << qf << " [shape=doublecircle]\n";
         for (std::size_t q1 = 0; q1 < Q; q1++) {
-            auto const& s = delta[q1][0];
-            auto it = s.begin();
-            if (it != s.end()) {
-                f << "\t" << q1 << " -> ";
-                for (; std::next(it) != s.end(); ++it)
-                    f << *it << ",";
-                f << *it << " [label=\"\u03b5\"]\n";
-            }
-            for (std::size_t a = 1; a < Sigma.size(); ++a) {
+            for (std::size_t qp : epsilon_parents[q1])
+                f << "\t" << qp << " -> " << q1 << " [label=\"\u03b5\"]\n";
+            for (std::size_t a = 0; a < Sigma.size(); ++a) {
                 auto const& s = delta[q1][a];
-                it = s.begin();
+                auto it = s.begin();
                 if (it != s.end()) {
                     f << "\t" << q1 << " -> ";
                     for (; std::next(it) != s.end(); ++it)
@@ -166,67 +166,6 @@ public:
         e.add_transition(0, a, 1);
         return e;
     }
-    static enfa<Alpha> concat_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
-    {
-        std::vector<std::size_t> e2_old_to_new(e2.Q, -1);
-
-        e2_old_to_new[e2.q0] = e1.qf;
-
-        for (std::size_t q1 = 0; q1 < e2.Q; ++q1) {
-            if (e2_old_to_new[q1] + 1 == 0) {
-                e2_old_to_new[q1] = e1.Q;
-                e1.add_state(e1.Q);
-            }
-            std::size_t q1_new = e2_old_to_new[q1];
-
-            for (std::size_t q2 : e2.delta[q1][0]) {
-                if (e2_old_to_new[q2] + 1 == 0) {
-                    e2_old_to_new[q2] = e1.Q;
-                    e1.add_state(e1.Q);
-                }
-                e1.add_epsilon_transition(q1_new, e2_old_to_new[q2]);
-            }
-
-            for (std::size_t a = 1; a < e2.Sigma.size(); ++a) {
-                for (std::size_t q2 : e2.delta[q1][a]) {
-                    if (e2_old_to_new[q2] + 1 == 0) {
-                        e2_old_to_new[q2] = e1.Q;
-                        e1.add_state(e1.Q);
-                    }
-                    e1.add_transition(q1_new, e2.Sigma[a], e2_old_to_new[q2]);
-                }
-            }
-        }
-
-        e1.qf = e2_old_to_new[e2.qf];
-
-        return e1;
-    }
-    static enfa<Alpha> union_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
-    {
-        std::size_t inc = e1.Q;
-
-        for (std::size_t q1 = 0; q1 < e2.Q; ++q1) {
-            for (std::size_t q2 : e2.delta[q1][0])
-                e1.add_epsilon_transition(q1 + inc, q2 + inc);
-            for (std::size_t a = 1; a < e2.Sigma.size(); ++a)
-                for (std::size_t q2 : e2.delta[q1][a])
-                    e1.add_transition(q1 + inc, e2.Sigma[a], q2 + inc);
-        }
-
-        std::size_t new_q0 = e1.Q;
-        std::size_t new_qf = e1.Q + 1;
-
-        e1.add_epsilon_transition(new_q0, e1.q0);
-        e1.add_epsilon_transition(e1.qf, new_qf);
-        e1.add_epsilon_transition(new_q0, e2.q0 + inc);
-        e1.add_epsilon_transition(e2.qf + inc, new_qf);
-
-        e1.q0 = new_q0;
-        e1.qf = new_qf;
-
-        return e1;
-    }
     static enfa<Alpha> kleene_star_enfa(enfa<Alpha> e1)
     {
         std::size_t new_q0 = e1.Q;
@@ -236,6 +175,59 @@ public:
         e1.add_epsilon_transition(new_q0, e1.q0);
         e1.add_epsilon_transition(e1.qf, new_qf);
         e1.add_epsilon_transition(new_q0, new_qf);
+
+        e1.q0 = new_q0;
+        e1.qf = new_qf;
+
+        return e1;
+    }
+
+private:
+    static std::size_t fuse_enfa(enfa<Alpha>& e1, enfa<Alpha> const& e2)
+    {
+        std::size_t inc = e1.Q;
+
+        for (std::size_t q1 = 0; q1 < e2.Q; ++q1) {
+            e1.add_state(q1 + inc);
+            for (std::size_t a = 0; a < e2.Sigma.size(); ++a)
+                for (std::size_t q2 : e2.delta[q1][a])
+                    e1.add_transition(q1 + inc, e2.Sigma[a], q2 + inc);
+        }
+
+        for (std::size_t q2 = 0; q2 < e2.Q; ++q2) {
+            std::set<std::size_t> new_e_c, new_e_p;
+            for (std::size_t qc : e2.epsilon_closure[q2])
+                new_e_c.insert(qc + inc);
+            for (std::size_t qp : e2.epsilon_parents[q2])
+                new_e_p.insert(qp + inc);
+            e1.epsilon_closure[q2 + inc] = new_e_c;
+            e1.epsilon_parents[q2 + inc] = new_e_p;
+        }
+
+        return inc;
+    }
+
+public:
+    static enfa<Alpha> concat_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
+    {
+        std::size_t inc = fuse_enfa(e1, e2);
+
+        e1.add_epsilon_transition(e1.qf, e2.q0 + inc);
+        e1.qf = e2.qf + inc;
+
+        return e1;
+    }
+    static enfa<Alpha> union_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
+    {
+        std::size_t inc = fuse_enfa(e1, e2);
+
+        std::size_t new_q0 = e1.Q;
+        std::size_t new_qf = e1.Q + 1;
+
+        e1.add_epsilon_transition(new_q0, e1.q0);
+        e1.add_epsilon_transition(e1.qf, new_qf);
+        e1.add_epsilon_transition(new_q0, e2.q0 + inc);
+        e1.add_epsilon_transition(e2.qf + inc, new_qf);
 
         e1.q0 = new_q0;
         e1.qf = new_qf;
