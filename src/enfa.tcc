@@ -133,6 +133,99 @@ public:
         }
         f << "}\n";
     }
+
+    static enfa<Alpha> empty_expr_enfa()
+    {
+        enfa<Alpha> e;
+        e.mark_start_state(0);
+        e.mark_finish_state(1);
+        e.add_epsilon_transition(0, 1);
+        return e;
+    }
+    static enfa<Alpha> letter_enfa(Alpha a)
+    {
+        enfa<Alpha> e;
+        e.mark_start_state(0);
+        e.mark_finish_state(1);
+        e.add_transition(0, a, 1);
+        return e;
+    }
+    static enfa<Alpha> concat_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
+    {
+        std::vector<std::size_t> e2_old_to_new(e2.Q, -1);
+
+        e2_old_to_new[e2.q0] = e1.qf;
+
+        for (std::size_t q1 = 0; q1 < e2.Q; ++q1) {
+            if (e2_old_to_new[q1] + 1 == 0) {
+                e2_old_to_new[q1] = e1.Q;
+                e1.add_state(e1.Q);
+            }
+            std::size_t q1_new = e2_old_to_new[q1];
+
+            for (std::size_t q2 : e2.delta[q1][0]) {
+                if (e2_old_to_new[q2] + 1 == 0) {
+                    e2_old_to_new[q2] = e1.Q;
+                    e1.add_state(e1.Q);
+                }
+                e1.add_epsilon_transition(q1_new, e2_old_to_new[q2]);
+            }
+
+            for (std::size_t a = 1; a < e2.Sigma.size(); ++a) {
+                for (std::size_t q2 : e2.delta[q1][a]) {
+                    if (e2_old_to_new[q2] + 1 == 0) {
+                        e2_old_to_new[q2] = e1.Q;
+                        e1.add_state(e1.Q);
+                    }
+                    e1.add_transition(q1_new, a, e2_old_to_new[q2]);
+                }
+            }
+        }
+
+        e1.qf = e2_old_to_new[e2.qf];
+
+        return e1;
+    }
+    static enfa<Alpha> union_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
+    {
+        std::size_t inc = e1.Q;
+
+        for (std::size_t q1 = 0; q1 < e2.Q; ++q1) {
+            for (std::size_t q2 : e2.delta[q1][0])
+                e1.add_epsilon_transition(q1 + inc, q2 + inc);
+            for (std::size_t a = 1; a < e2.Sigma.size(); ++a)
+                for (std::size_t q2 : e2.delta[q1][a])
+                    e1.add_transition(q1 + inc, a, q2 + inc);
+        }
+
+        std::size_t new_q0 = e1.Q;
+        std::size_t new_qf = e1.Q + 1;
+
+        e1.add_epsilon_transition(new_q0, e1.q0);
+        e1.add_epsilon_transition(e1.qf, new_qf);
+        e1.add_epsilon_transition(new_q0, e2.q0 + inc);
+        e1.add_epsilon_transition(e2.qf + inc, new_qf);
+
+        e1.q0 = new_q0;
+        e1.qf = new_qf;
+
+        return e1;
+    }
+    static enfa<Alpha> kleene_star_enfa(enfa<Alpha> e1)
+    {
+        std::size_t new_q0 = e1.Q;
+        std::size_t new_qf = e1.Q + 1;
+
+        e1.add_epsilon_transition(e1.qf, e1.q0);
+        e1.add_epsilon_transition(new_q0, e1.q0);
+        e1.add_epsilon_transition(e1.qf, new_qf);
+        e1.add_epsilon_transition(new_q0, new_qf);
+
+        e1.q0 = new_q0;
+        e1.qf = new_qf;
+
+        return e1;
+    }
 };
 
 #endif // ENFA_TCC
