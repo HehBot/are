@@ -6,4 +6,4 @@ BUILD_DIR := build
 BIN_DIR := bin
 SRC_DIR := src
 
-CXX_FLAGS := -Wall -Wpedantic -Werror -MMD -MP -O3
+CXX_FLAGS := -Wall -Wpedantic -Werror -MMD -MP -g

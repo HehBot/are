@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
+// epsilon-nfa with single start state and atmost 1 finish state
 template<typename Alpha, class Alpha_Hash = std::hash<Alpha>>
 class enfa {
 private:
@@ -81,20 +82,35 @@ public:
             return false;
         std::set<std::size_t> curr({ q0 });
 
+        // curr = epsilon-closure of curr
+        std::set<std::size_t> temp = curr;
+        do {
+            curr = temp;
+            for (std::size_t q : curr) {
+                auto const& s = delta[q][0];
+                temp.insert(s.begin(), s.end());
+            }
+        } while (curr != temp);
+
         for (auto const& alpha : str) {
+            // temp = delta(curr, alpha)
+            if (Sigma_index.count(alpha) == 0)
+                return false;
             std::size_t a = Sigma_index[alpha];
-            std::set<std::size_t> next;
+            temp.clear();
             for (std::size_t q : curr) {
                 auto const& s = delta[q][a];
-                next.insert(s.begin(), s.end());
+                temp.insert(s.begin(), s.end());
             }
-            while (curr != next) {
-                curr = next;
+
+            // curr = epsilon_closure(temp)
+            do {
+                curr = temp;
                 for (std::size_t q : curr) {
                     auto const& s = delta[q][0];
-                    next.insert(s.begin(), s.end());
+                    temp.insert(s.begin(), s.end());
                 }
-            }
+            } while (curr != temp);
         }
 
         return (curr.count(qf) == 1);
@@ -177,7 +193,7 @@ public:
                         e2_old_to_new[q2] = e1.Q;
                         e1.add_state(e1.Q);
                     }
-                    e1.add_transition(q1_new, a, e2_old_to_new[q2]);
+                    e1.add_transition(q1_new, e2.Sigma[a], e2_old_to_new[q2]);
                 }
             }
         }
@@ -195,7 +211,7 @@ public:
                 e1.add_epsilon_transition(q1 + inc, q2 + inc);
             for (std::size_t a = 1; a < e2.Sigma.size(); ++a)
                 for (std::size_t q2 : e2.delta[q1][a])
-                    e1.add_transition(q1 + inc, a, q2 + inc);
+                    e1.add_transition(q1 + inc, e2.Sigma[a], q2 + inc);
         }
 
         std::size_t new_q0 = e1.Q;
