@@ -184,6 +184,9 @@ public:
         add_state(q1);
         add_state(q2);
 
+        if (q1 == q2)
+            return;
+
         epsilon_parents[q2].insert(q1);
 
         std::set<std::size_t> visited;
@@ -258,8 +261,57 @@ public:
         return e1;
     }
 
-private:
-    static std::size_t fuse_enfa(enfa<Alpha>& e1, enfa<Alpha> const& e2)
+public:
+    static enfa<Alpha> concat_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
+    {
+        std::size_t e1_qf;
+        if (e1.F.size() == 1)
+            e1_qf = *e1.F.begin();
+        else {
+            e1_qf = e1.Q;
+            e1.add_state(e1_qf);
+            for (std::size_t q : e1.F)
+                e1.add_epsilon_transition(q, e1_qf);
+            e1.F = { e1_qf };
+        }
+
+        std::vector<std::size_t> e2_to_new_e1(e2.Q, -1);
+        for (std::size_t q = 0; q < e2.Q; ++q) {
+            std::size_t q_new;
+            if (q == e2.q0) {
+                q_new = e1_qf;
+            } else {
+                q_new = e1.Q;
+                e1.add_state(e1.Q);
+            }
+            e2_to_new_e1[q] = q_new;
+        }
+        for (std::size_t q1 = 0; q1 < e2.Q; ++q1) {
+            for (std::size_t a = 0; a < e2.Sigma.size(); ++a)
+                for (std::size_t q2 : e2.delta[q1][a])
+                    e1.add_transition(e2_to_new_e1[q1], e2.Sigma[a], e2_to_new_e1[q2]);
+        }
+
+        for (std::size_t q2 = 0; q2 < e2.Q; ++q2) {
+            std::set<std::size_t> new_e_c, new_e_p;
+            for (std::size_t qc : e2.epsilon_closure[q2])
+                new_e_c.insert(e2_to_new_e1[qc]);
+            for (std::size_t qp : e2.epsilon_parents[q2])
+                new_e_p.insert(e2_to_new_e1[qp]);
+            e1.epsilon_closure[e2_to_new_e1[q2]].insert(new_e_c.begin(), new_e_c.end());
+            e1.epsilon_parents[e2_to_new_e1[q2]].insert(new_e_p.begin(), new_e_p.end());
+        }
+
+        for (std::size_t e1_qf : e1.F)
+            e1.add_epsilon_transition(e1_qf, e2_to_new_e1[e2.q0]);
+
+        e1.F.clear();
+        for (std::size_t e2_qf : e2.F)
+            e1.F.insert(e2_to_new_e1[e2_qf]);
+
+        return e1;
+    }
+    static enfa<Alpha> union_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
     {
         std::size_t inc = e1.Q;
 
@@ -279,27 +331,6 @@ private:
             e1.epsilon_closure[q2 + inc] = new_e_c;
             e1.epsilon_parents[q2 + inc] = new_e_p;
         }
-
-        return inc;
-    }
-
-public:
-    static enfa<Alpha> concat_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
-    {
-        std::size_t inc = fuse_enfa(e1, e2);
-
-        for (std::size_t e1_qf : e1.F)
-            e1.add_epsilon_transition(e1_qf, e2.q0 + inc);
-
-        e1.F.clear();
-        for (std::size_t e2_qf : e2.F)
-            e1.F.insert(e2_qf + inc);
-
-        return e1;
-    }
-    static enfa<Alpha> union_enfa(enfa<Alpha> e1, enfa<Alpha> const& e2)
-    {
-        std::size_t inc = fuse_enfa(e1, e2);
 
         std::size_t new_q0 = e1.Q;
         std::size_t new_qf = e1.Q + 1;

@@ -5,7 +5,7 @@
 #include <string>
 
 #ifdef DEBUG
-void dbg(std::string s, enfa<char> const& e)
+void dbg(std::string const& s, enfa<char> const& e)
 {
     std::cout << s << '\n';
     e.create_dot_file((s + ".dot").c_str());
