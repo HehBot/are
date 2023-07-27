@@ -19,12 +19,17 @@ int main()
     if (std::system((std::string("neato -Tsvg -o '") + s + ".svg' '" + s + ".dot'").c_str()))
         std::cout << s << " file failed\n";
 
+    nfa<char> n = e.to_nfa();
+    n.create_dot_file((s + "_nfa.dot").c_str());
+    if (std::system((std::string("dot -Tsvg -o '") + s + "_nfa.svg' '" + s + "_nfa.dot'").c_str()))
+        std::cout << s << "_nfa file failed\n";
+
     std::cout << "Check\n";
     while (true) {
         std::cin >> s;
         std::vector<char> s_vec(s.length());
         for (std::size_t i = 0; i < s.length(); ++i)
             s_vec[i] = s[i];
-        std::cout << "'" << s << "': " << (e.accept(s_vec) ? "yes" : "no") << '\n';
+        std::cout << "'" << s << "': " << (n.accept(s_vec) ? "yes" : "no") << '\n';
     }
 }

@@ -8,23 +8,144 @@
 #include <unordered_set>
 #include <vector>
 
-// epsilon-nfa with single start state and atmost 1 finish state
+template<typename a, class a_Hash> class enfa;
+
 template<typename Alpha, class Alpha_Hash = std::hash<Alpha>>
-class enfa {
-private:
+class nfa {
+protected:
     std::size_t Q; // state space
+
+    std::size_t q0;
+    std::set<std::size_t> F;
 
     std::vector<Alpha> Sigma; // alphabet
     std::unordered_map<Alpha, std::size_t, Alpha_Hash> Sigma_index;
 
-    std::size_t q0, qf;
-
     std::vector<std::vector<std::set<std::size_t>>> delta;
+
+protected:
+    virtual void add_state(std::size_t q)
+    {
+        if (q >= Q) {
+            for (std::size_t i = Q; i <= q; ++i)
+                delta.push_back(std::vector<std::set<std::size_t>>(Sigma.size()));
+            Q = q + 1;
+        }
+    }
+    virtual void add_letter(Alpha a)
+    {
+        if (Sigma_index.count(a) == 0) {
+            Sigma_index[a] = Sigma.size();
+            Sigma.push_back(a);
+            std::size_t S = Sigma.size();
+            for (std::size_t i = 0; i < Q; ++i)
+                delta[i].resize(S);
+        }
+    }
+
+    virtual void print_aux(std::ostream& f, std::size_t q) const
+    {
+    }
+
+public:
+    nfa()
+        : Q(0), q0(-1)
+    {
+    }
+
+    void add_transition(std::size_t q1, Alpha a, std::size_t q2)
+    {
+        add_state(q1);
+        add_state(q2);
+        add_letter(a);
+
+        delta[q1][Sigma_index[a]].insert(q2);
+    }
+    void mark_start_state(std::size_t q)
+    {
+        add_state(q);
+        q0 = q;
+    }
+    void mark_finish_state(std::size_t q)
+    {
+        add_state(q);
+        F.insert(q);
+    }
+
+    virtual bool accept(std::vector<Alpha> const& str)
+    {
+        if (q0 + 1 == 0)
+            throw std::domain_error("\u03b5-NFA start state not defined");
+        if (F.size() == 0)
+            return false;
+
+        std::set<std::size_t> curr = { q0 };
+
+        for (auto const& alpha : str) {
+            // temp = delta(curr, alpha)
+            if (Sigma_index.count(alpha) == 0)
+                return false;
+            std::size_t a = Sigma_index[alpha];
+            std::set<std::size_t> temp;
+            for (std::size_t q : curr) {
+                auto const& s = delta[q][a];
+                temp.insert(s.begin(), s.end());
+            }
+            curr = temp;
+        }
+
+        for (std::size_t qf : F)
+            if (curr.count(qf) == 1)
+                return true;
+        return false;
+    }
+
+    void create_dot_file(char const* filename) const
+    {
+        std::ofstream f(filename);
+
+        f << "digraph {\n";
+        if (q0 + 1 != 0) {
+            f << "\tn0 [label=\"\", shape=none, height=0, width=0]\n";
+            f << "\tn0 -> " << q0 << " [shape=doublecircle]\n";
+        }
+        for (std::size_t qf : F)
+            f << "\t" << qf << " [shape=doublecircle]\n";
+        for (std::size_t q1 = 0; q1 < Q; q1++) {
+            print_aux(f, q1);
+            for (std::size_t a = 0; a < Sigma.size(); ++a) {
+                auto const& s = delta[q1][a];
+                auto it = s.begin();
+                if (it != s.end()) {
+                    f << "\t" << q1 << " -> ";
+                    for (; std::next(it) != s.end(); ++it)
+                        f << *it << ",";
+                    f << *it << " [label=\"" << Sigma[a] << "\"]\n";
+                }
+            }
+        }
+        f << "}\n";
+    }
+
+    friend class enfa<Alpha, Alpha_Hash>;
+};
+
+// epsilon-nfa with single start state and atmost 1 finish state
+template<typename Alpha, class Alpha_Hash = std::hash<Alpha>>
+class enfa : public nfa<Alpha, Alpha_Hash> {
+    using nfa<Alpha, Alpha_Hash>::Q;
+    using nfa<Alpha, Alpha_Hash>::q0;
+    using nfa<Alpha, Alpha_Hash>::F;
+    using nfa<Alpha, Alpha_Hash>::Sigma;
+    using nfa<Alpha, Alpha_Hash>::Sigma_index;
+    using nfa<Alpha, Alpha_Hash>::delta;
+
+protected:
     std::vector<std::set<std::size_t>> epsilon_closure; // contains epsilon closure of state q
     std::vector<std::set<std::size_t>> epsilon_parents; // contains epsilon parents of state q
 
-private:
-    void add_state(std::size_t q)
+protected:
+    virtual void add_state(std::size_t q) override
     {
         if (q >= Q) {
             epsilon_closure.resize(q + 1);
@@ -34,16 +155,6 @@ private:
                 epsilon_closure[i] = { i };
             }
             Q = q + 1;
-        }
-    }
-    void add_letter(Alpha a)
-    {
-        if (Sigma_index.count(a) == 0) {
-            Sigma_index[a] = Sigma.size();
-            Sigma.push_back(a);
-            std::size_t S = Sigma.size();
-            for (std::size_t i = 0; i < Q; ++i)
-                delta[i].resize(S);
         }
     }
     void update_epsilon_closure(std::size_t q, std::set<std::size_t> const& e_c, std::set<std::size_t>& visited)
@@ -56,20 +167,18 @@ private:
             update_epsilon_closure(qp, e_c, visited);
     }
 
+    virtual void print_aux(std::ostream& f, std::size_t q) const override
+    {
+        for (std::size_t qp : epsilon_parents[q])
+            f << "\t" << qp << " -> " << q << " [label=\"\u03b5\"]\n";
+    }
+
 public:
     enfa()
-        : Q(0), q0(-1), qf(-1)
+        : nfa<Alpha, Alpha_Hash>()
     {
     }
 
-    void add_transition(std::size_t q1, Alpha a, std::size_t q2)
-    {
-        add_state(q1);
-        add_state(q2);
-        add_letter(a);
-
-        delta[q1][Sigma_index[a]].insert(q2);
-    }
     void add_epsilon_transition(std::size_t q1, std::size_t q2)
     {
         add_state(q1);
@@ -80,22 +189,12 @@ public:
         std::set<std::size_t> visited;
         update_epsilon_closure(q1, epsilon_closure[q2], visited);
     }
-    void mark_start_state(std::size_t q)
-    {
-        add_state(q);
-        q0 = q;
-    }
-    void mark_finish_state(std::size_t q)
-    {
-        add_state(q);
-        qf = q;
-    }
 
-    bool accept(std::vector<Alpha> const& str)
+    virtual bool accept(std::vector<Alpha> const& str) override
     {
         if (q0 + 1 == 0)
             throw std::domain_error("\u03b5-NFA start state not defined");
-        if (qf + 1 == 0)
+        if (F.size() == 0)
             return false;
 
         std::set<std::size_t> curr = epsilon_closure[q0];
@@ -119,35 +218,10 @@ public:
             }
         }
 
-        return (curr.count(qf) == 1);
-    }
-
-    void create_dot_file(char const* filename) const
-    {
-        std::ofstream f(filename);
-
-        f << "digraph {\n";
-        if (q0 + 1 != 0) {
-            f << "\tn0 [label=\"\", shape=none, height=0, width=0]\n";
-            f << "\tn0 -> " << q0 << " [shape=doublecircle]\n";
-        }
-        if (qf + 1 != 0)
-            f << "\t" << qf << " [shape=doublecircle]\n";
-        for (std::size_t q1 = 0; q1 < Q; q1++) {
-            for (std::size_t qp : epsilon_parents[q1])
-                f << "\t" << qp << " -> " << q1 << " [label=\"\u03b5\"]\n";
-            for (std::size_t a = 0; a < Sigma.size(); ++a) {
-                auto const& s = delta[q1][a];
-                auto it = s.begin();
-                if (it != s.end()) {
-                    f << "\t" << q1 << " -> ";
-                    for (; std::next(it) != s.end(); ++it)
-                        f << *it << ",";
-                    f << *it << " [label=\"" << Sigma[a] << "\"]\n";
-                }
-            }
-        }
-        f << "}\n";
+        for (std::size_t qf : F)
+            if (curr.count(qf) == 1)
+                return true;
+        return false;
     }
 
     static enfa<Alpha> empty_expr_enfa()
@@ -171,13 +245,15 @@ public:
         std::size_t new_q0 = e1.Q;
         std::size_t new_qf = e1.Q + 1;
 
-        e1.add_epsilon_transition(e1.qf, e1.q0);
         e1.add_epsilon_transition(new_q0, e1.q0);
-        e1.add_epsilon_transition(e1.qf, new_qf);
         e1.add_epsilon_transition(new_q0, new_qf);
+        for (std::size_t e1_qf : e1.F) {
+            e1.add_epsilon_transition(e1_qf, e1.q0);
+            e1.add_epsilon_transition(e1_qf, new_qf);
+        }
 
         e1.q0 = new_q0;
-        e1.qf = new_qf;
+        e1.F = { new_qf };
 
         return e1;
     }
@@ -212,8 +288,12 @@ public:
     {
         std::size_t inc = fuse_enfa(e1, e2);
 
-        e1.add_epsilon_transition(e1.qf, e2.q0 + inc);
-        e1.qf = e2.qf + inc;
+        for (std::size_t e1_qf : e1.F)
+            e1.add_epsilon_transition(e1_qf, e2.q0 + inc);
+
+        e1.F.clear();
+        for (std::size_t e2_qf : e2.F)
+            e1.F.insert(e2_qf + inc);
 
         return e1;
     }
@@ -225,14 +305,43 @@ public:
         std::size_t new_qf = e1.Q + 1;
 
         e1.add_epsilon_transition(new_q0, e1.q0);
-        e1.add_epsilon_transition(e1.qf, new_qf);
+        for (std::size_t e1_qf : e1.F)
+            e1.add_epsilon_transition(e1_qf, new_qf);
         e1.add_epsilon_transition(new_q0, e2.q0 + inc);
-        e1.add_epsilon_transition(e2.qf + inc, new_qf);
+        for (std::size_t e2_qf : e2.F)
+            e1.add_epsilon_transition(e2_qf + inc, new_qf);
 
         e1.q0 = new_q0;
-        e1.qf = new_qf;
+        e1.F = { new_qf };
 
         return e1;
+    }
+
+    nfa<Alpha> to_nfa() const
+    {
+        nfa<Alpha> n;
+
+        n.Sigma = Sigma;
+        n.Sigma_index = Sigma_index;
+        n.add_state(Q - 1);
+        n.mark_start_state(q0);
+        n.F = F;
+        for (std::size_t q : epsilon_closure[q0]) {
+            if (F.count(q) == 1) {
+                n.F.insert(q0);
+                break;
+            }
+        }
+
+        for (std::size_t q = 0; q < Q; ++q)
+            for (std::size_t a = 0; a < Sigma.size(); ++a)
+                for (std::size_t r : epsilon_closure[q])
+                    for (std::size_t d : delta[r][a]) {
+                        auto const& ec = epsilon_closure[d];
+                        n.delta[q][a].insert(ec.begin(), ec.end());
+                    }
+
+        return n;
     }
 };
 
